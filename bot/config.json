@@ -1,0 +1,22 @@
+
+{
+    "telegram": {
+        "token": "",
+        "admin_user_ids": "-",
+        "allowed_user_ids": "*",
+        "enable_quoting": true,
+        "enable_image_generation": true,
+        "allow_group_chats": false
+    },
+    "openai": {
+        "api_key": "",
+        "model": "gpt-4",
+        "api_base": "https://api.openai.com/v1"
+    },
+    "chatgpt": {
+        "provider": "openai",
+        "assistant_prompt": "You are a helpful assistant.",
+        "max_tokens": 2000,
+        "temperature": 1.0
+    }
+}
