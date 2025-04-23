@@ -12,6 +12,54 @@ from telegram import Message, MessageEntity, Update, ChatMember, constants
 from telegram.ext import CallbackContext, ContextTypes
 
 from usage_tracker import UsageTracker
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+from openai import OpenAI
+
+def get_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("❌ Thiếu biến môi trường OPENAI_API_KEY.")
+    return OpenAI(api_key=api_key)
+
+# --- Extract content using Playwright ---
+async def extract_text_from_url(url: str) -> str:
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(url, timeout=15000)
+            await page.wait_for_timeout(3000)
+            html = await page.content()
+            await browser.close()
+
+        soup = BeautifulSoup(html, "html.parser")
+        paragraphs = soup.find_all("p")
+        extracted_text = "\n".join(p.get_text().strip() for p in paragraphs if p.get_text().strip())
+        return extracted_text if extracted_text else "❌ Không trích xuất được đoạn văn nào."
+    except Exception as e:
+        return f"❌ Lỗi khi dùng trình duyệt ẩn để trích xuất: {e}"
+
+# --- Summarize extracted content using OpenAI ---
+async def summarize_url(url: str) -> str:
+    content = await extract_text_from_url(url)
+    if not content or len(content.strip()) < 100:
+        return "📄 Bot chưa tóm tắt được nội dung. Anh vui lòng cung cấp thông tin rõ ràng hơn, hoặc thử lại với link khác nhé!"
+
+    prompt = f"Tóm tắt nội dung sau bằng tiếng Việt, rõ ràng và ngắn gọn:\n\n{content}"
+    try:
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=500
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"❌ Lỗi khi gọi OpenAI: {e}"
+
+# (The rest of the file remains unchanged.)
 
 
 def message_text(message: Message) -> str:
