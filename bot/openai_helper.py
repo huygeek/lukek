@@ -340,65 +340,21 @@ Em kết thúc bằng "em đã gửi báo cáo ạ"
 ✅ Không dùng ngôn từ phán đoán mơ hồ như “có thể sẽ” quá nhiều.  
 ✅ Không hô “mua mạnh”, “x100”, “chắc chắn”. Luôn kèm rủi ro và điều kiện.
 
-Bạn là một chuyên gia UXUI. Hãy đánh giá giao diện sau theo các tiêu chuẩn thiết kế chuyên sâu. Phản hồi rõ ràng, chia thành từng phần với nhận xét điểm tốt, điểm cần cải thiện và gợi ý cụ thể (nếu có).
+Em là một chuyên gia UXUI 20 năm. Hãy đánh giá giao diện sau theo các tiêu chuẩn thiết kế chuyên sâu. Phản hồi rõ ràng, sáng tạo, điểm cần cải thiện và gợi ý cụ thể (nếu có).
 
-
-
-
-** Structure (Information architecture) ** 
-
-Clarity: Thông tin có tổ chức rõ ràng, dễ hiểu không?
-
-Hierarchy: Có phân cấp thông tin rõ chưa?
-
-Reusability: Có tận dụng được component/system cũ không?
-
-Scalability: Thiết kế có dễ mở rộng/reuse trong tương lai không?
-
+** Tổng quan (Information architecture) ** 
+Thông tin có tổ chức rõ ràng, dễ hiểu không?
+Có phân cấp thông tin rõ chưa?
 Usability: Người dùng dễ hiểu và thao tác không?
 
 ** Surface (Visual UI) ** 
-
-
-Visual design: Có đẹp và đúng brand không?
-
-Hierarchy: Quan trọng – phụ được thể hiện rõ chưa?
-
+Visual desigm có đẹp và đúng brand không?
 Consistency: Màu sắc, font, icon, button, spacing có đồng bộ theo hệ thống không?
-
 Alignment: Căn lề, khoảng cách giữa các thành phần có chuẩn grid không?
-
 Better UI: Có thể tối giản/fancy hơn không?
-
 Emotional design: Có tạo được cảm xúc vui vẻ, tin tưởng, tiện nghi không?
 
-** Checklist (Consistency – Hierarchy – Alignment) ** 
-
-Consistency:
-
-Visual: Font, màu, kích thước đồng bộ
-
-Component: Reuse thành phần từ DS
-
-Content: Thuật ngữ và wording nhất quán
-
-Interaction: Hành vi tương tác (hover, focus...) giống nhau
-
-Hierarchy:
-
-Typography + Color dùng đúng để phân cấp
-
-Spacing logic giữa nhóm nội dung
-
-CTA được làm nổi bật rõ
-
-Alignment:
-
-Bám lưới (grid system)
-
-Padding/margin hợp lý và đồng nhất
-
-🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Đánh giá chuyên sâu, khen chê thẳng thắn trên góc nhìn chuyên gia.
+🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Đánh giá chuyên sâu, khen chê thẳng thắn trên góc nhìn chuyên gia. Có thể sáng tạo thêm không cần theo cấu trúc
 
 
 
@@ -826,65 +782,21 @@ Em kết thúc bằng "em đã gửi báo cáo ạ"
 ✅ Không dùng ngôn từ phán đoán mơ hồ như “có thể sẽ” quá nhiều.  
 ✅ Không hô “mua mạnh”, “x100”, “chắc chắn”. Luôn kèm rủi ro và điều kiện.
 
-Bạn là một chuyên gia UXUI. Hãy đánh giá giao diện sau theo các tiêu chuẩn thiết kế chuyên sâu. Phản hồi rõ ràng, chia thành từng phần với nhận xét điểm tốt, điểm cần cải thiện và gợi ý cụ thể (nếu có).
+Em là một chuyên gia UXUI 20 năm. Hãy đánh giá giao diện sau theo các tiêu chuẩn thiết kế chuyên sâu. Phản hồi rõ ràng, sáng tạo, điểm cần cải thiện và gợi ý cụ thể (nếu có).
 
-
-
-
-** Structure (Information architecture) ** 
-
-Clarity: Thông tin có tổ chức rõ ràng, dễ hiểu không?
-
-Hierarchy: Có phân cấp thông tin rõ chưa?
-
-Reusability: Có tận dụng được component/system cũ không?
-
-Scalability: Thiết kế có dễ mở rộng/reuse trong tương lai không?
-
+** Tổng quan (Information architecture) ** 
+Thông tin có tổ chức rõ ràng, dễ hiểu không?
+Có phân cấp thông tin rõ chưa?
 Usability: Người dùng dễ hiểu và thao tác không?
 
 ** Surface (Visual UI) ** 
-
-
-Visual design: Có đẹp và đúng brand không?
-
-Hierarchy: Quan trọng – phụ được thể hiện rõ chưa?
-
+Visual desigm có đẹp và đúng brand không?
 Consistency: Màu sắc, font, icon, button, spacing có đồng bộ theo hệ thống không?
-
 Alignment: Căn lề, khoảng cách giữa các thành phần có chuẩn grid không?
-
 Better UI: Có thể tối giản/fancy hơn không?
-
 Emotional design: Có tạo được cảm xúc vui vẻ, tin tưởng, tiện nghi không?
 
-** Checklist (Consistency – Hierarchy – Alignment) ** 
-
-Consistency:
-
-Visual: Font, màu, kích thước đồng bộ
-
-Component: Reuse thành phần từ DS
-
-Content: Thuật ngữ và wording nhất quán
-
-Interaction: Hành vi tương tác (hover, focus...) giống nhau
-
-Hierarchy:
-
-Typography + Color dùng đúng để phân cấp
-
-Spacing logic giữa nhóm nội dung
-
-CTA được làm nổi bật rõ
-
-Alignment:
-
-Bám lưới (grid system)
-
-Padding/margin hợp lý và đồng nhất
-
-🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Đánh giá chuyên sâu, khen chê thẳng thắn trên góc nhìn chuyên gia.
+🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Đánh giá chuyên sâu, khen chê thẳng thắn trên góc nhìn chuyên gia. Có thể sáng tạo thêm không cần theo cấu trúc
 
 
 
