@@ -1,364 +1,391 @@
-import os.path
-import pathlib
+from __future__ import annotations
+
+import asyncio
+import itertools
 import json
-from datetime import date
+import logging
+import os
+import base64
+
+import telegram
+from telegram import Message, MessageEntity, Update, ChatMember, constants
+from telegram.ext import CallbackContext, ContextTypes
+
+from usage_tracker import UsageTracker
 
 
-def year_month(date_str):
-    # extract string of year-month from date, eg: '2023-03'
-    return str(date_str)[:7]
-
-
-class UsageTracker:
+def message_text(message: Message) -> str:
     """
-    UsageTracker class
-    Enables tracking of daily/monthly usage per user.
-    User files are stored as JSON in /usage_logs directory.
-    JSON example:
-    {
-        "user_name": "@user_name",
-        "current_cost": {
-            "day": 0.45,
-            "month": 3.23,
-            "all_time": 3.23,
-            "last_update": "2023-03-14"},
-        "usage_history": {
-            "chat_tokens": {
-                "2023-03-13": 520,
-                "2023-03-14": 1532
-            },
-            "transcription_seconds": {
-                "2023-03-13": 125,
-                "2023-03-14": 64
-            },
-            "number_images": {
-                "2023-03-12": [0, 2, 3],
-                "2023-03-13": [1, 2, 3],
-                "2023-03-14": [0, 1, 2]
-            }
-        }
+    Returns the text of a message, excluding any bot commands.
+    """
+    message_txt = message.text
+    if message_txt is None:
+        return ''
+
+    for _, text in sorted(message.parse_entities([MessageEntity.BOT_COMMAND]).items(),
+                          key=(lambda item: item[0].offset)):
+        message_txt = message_txt.replace(text, '').strip()
+
+    return message_txt if len(message_txt) > 0 else ''
+
+
+async def is_user_in_group(update: Update, context: CallbackContext, user_id: int) -> bool:
+    """
+    Checks if user_id is a member of the group
+    """
+    try:
+        chat_member = await context.bot.get_chat_member(update.message.chat_id, user_id)
+        return chat_member.status in [ChatMember.OWNER, ChatMember.ADMINISTRATOR, ChatMember.MEMBER]
+    except telegram.error.BadRequest as e:
+        if str(e) == "User not found":
+            return False
+        else:
+            raise e
+    except Exception as e:
+        raise e
+
+
+def get_thread_id(update: Update) -> int | None:
+    """
+    Gets the message thread id for the update, if any
+    """
+    if update.effective_message and update.effective_message.is_topic_message:
+        return update.effective_message.message_thread_id
+    return None
+
+
+def get_stream_cutoff_values(update: Update, content: str) -> int:
+    """
+    Gets the stream cutoff values for the message length
+    """
+    if is_group_chat(update):
+        # group chats have stricter flood limits
+        return 180 if len(content) > 1000 else 120 if len(content) > 200 \
+            else 90 if len(content) > 50 else 50
+    return 90 if len(content) > 1000 else 45 if len(content) > 200 \
+        else 25 if len(content) > 50 else 15
+
+
+def is_group_chat(update: Update) -> bool:
+    """
+    Checks if the message was sent from a group chat
+    """
+    if not update.effective_chat:
+        return False
+    return update.effective_chat.type in [
+        constants.ChatType.GROUP,
+        constants.ChatType.SUPERGROUP
+    ]
+
+
+def split_into_chunks(text: str, chunk_size: int = 4096) -> list[str]:
+    """
+    Splits a string into chunks of a given size.
+    """
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
+async def wrap_with_indicator(update: Update, context: CallbackContext, coroutine,
+                              chat_action: constants.ChatAction = "", is_inline=False):
+    """
+    Wraps a coroutine while repeatedly sending a chat action to the user.
+    """
+    task = context.application.create_task(coroutine(), update=update)
+    while not task.done():
+        if not is_inline:
+            context.application.create_task(
+                update.effective_chat.send_action(chat_action, message_thread_id=get_thread_id(update))
+            )
+        try:
+            await asyncio.wait_for(asyncio.shield(task), 4.5)
+        except asyncio.TimeoutError:
+            pass
+
+
+async def edit_message_with_retry(context: ContextTypes.DEFAULT_TYPE, chat_id: int | None,
+                                  message_id: str, text: str, markdown: bool = True, is_inline: bool = False):
+    """
+    Edit a message with retry logic in case of failure (e.g. broken markdown)
+    :param context: The context to use
+    :param chat_id: The chat id to edit the message in
+    :param message_id: The message id to edit
+    :param text: The text to edit the message with
+    :param markdown: Whether to use markdown parse mode
+    :param is_inline: Whether the message to edit is an inline message
+    :return: None
+    """
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=int(message_id) if not is_inline else None,
+            inline_message_id=message_id if is_inline else None,
+            text=text,
+            parse_mode=constants.ParseMode.MARKDOWN if markdown else None,
+        )
+    except telegram.error.BadRequest as e:
+        if str(e).startswith("Message is not modified"):
+            return
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=int(message_id) if not is_inline else None,
+                inline_message_id=message_id if is_inline else None,
+                text=text,
+            )
+        except Exception as e:
+            logging.warning(f'Failed to edit message: {str(e)}')
+            raise e
+
+    except Exception as e:
+        logging.warning(str(e))
+        raise e
+
+
+async def error_handler(_: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles errors in the telegram-python-bot library.
+    """
+    logging.error(f'Exception while handling an update: {context.error}')
+
+
+async def is_allowed(config, update: Update, context: CallbackContext, is_inline=False) -> bool:
+    """
+    Checks if the user is allowed to use the bot.
+    """
+    if config['allowed_user_ids'] == '*':
+        return True
+
+    user_id = update.inline_query.from_user.id if is_inline else update.message.from_user.id
+    if is_admin(config, user_id):
+        return True
+    name = update.inline_query.from_user.name if is_inline else update.message.from_user.name
+    allowed_user_ids = config['allowed_user_ids'].split(',')
+    # Check if user is allowed
+    if str(user_id) in allowed_user_ids:
+        return True
+    # Check if it's a group a chat with at least one authorized member
+    if not is_inline and is_group_chat(update):
+        admin_user_ids = config['admin_user_ids'].split(',')
+        for user in itertools.chain(allowed_user_ids, admin_user_ids):
+            if not user.strip():
+                continue
+            if await is_user_in_group(update, context, user):
+                logging.info(f'{user} is a member. Allowing group chat message...')
+                return True
+        logging.info(f'Group chat messages from user {name} '
+                     f'(id: {user_id}) are not allowed')
+    return False
+
+
+def is_admin(config, user_id: int, log_no_admin=False) -> bool:
+    """
+    Checks if the user is the admin of the bot.
+    The first user in the user list is the admin.
+    """
+    if config['admin_user_ids'] == '-':
+        if log_no_admin:
+            logging.info('No admin user defined.')
+        return False
+
+    admin_user_ids = config['admin_user_ids'].split(',')
+
+    # Check if user is in the admin user list
+    if str(user_id) in admin_user_ids:
+        return True
+
+    return False
+
+
+def get_user_budget(config, user_id) -> float | None:
+    """
+    Get the user's budget based on their user ID and the bot configuration.
+    :param config: The bot configuration object
+    :param user_id: User id
+    :return: The user's budget as a float, or None if the user is not found in the allowed user list
+    """
+
+    # no budget restrictions for admins and '*'-budget lists
+    if is_admin(config, user_id) or config['user_budgets'] == '*':
+        return float('inf')
+
+    user_budgets = config['user_budgets'].split(',')
+    if config['allowed_user_ids'] == '*':
+        # same budget for all users, use value in first position of budget list
+        if len(user_budgets) > 1:
+            logging.warning('multiple values for budgets set with unrestricted user list '
+                            'only the first value is used as budget for everyone.')
+        return float(user_budgets[0])
+
+    allowed_user_ids = config['allowed_user_ids'].split(',')
+    if str(user_id) in allowed_user_ids:
+        user_index = allowed_user_ids.index(str(user_id))
+        if len(user_budgets) <= user_index:
+            logging.warning(f'No budget set for user id: {user_id}. Budget list shorter than user list.')
+            return 0.0
+        return float(user_budgets[user_index])
+    return None
+
+
+def get_remaining_budget(config, usage, update: Update, is_inline=False) -> float:
+    """
+    Calculate the remaining budget for a user based on their current usage.
+    :param config: The bot configuration object
+    :param usage: The usage tracker object
+    :param update: Telegram update object
+    :param is_inline: Boolean flag for inline queries
+    :return: The remaining budget for the user as a float
+    """
+    # Mapping of budget period to cost period
+    budget_cost_map = {
+        "monthly": "cost_month",
+        "daily": "cost_today",
+        "all-time": "cost_all_time"
     }
+
+    user_id = update.inline_query.from_user.id if is_inline else update.message.from_user.id
+    name = update.inline_query.from_user.name if is_inline else update.message.from_user.name
+    if user_id not in usage:
+        usage[user_id] = UsageTracker(user_id, name)
+
+    # Get budget for users
+    user_budget = get_user_budget(config, user_id)
+    budget_period = config['budget_period']
+    if user_budget is not None:
+        cost = usage[user_id].get_current_cost()[budget_cost_map[budget_period]]
+        return user_budget - cost
+
+    # Get budget for guests
+    if 'guests' not in usage:
+        usage['guests'] = UsageTracker('guests', 'all guest users in group chats')
+    cost = usage['guests'].get_current_cost()[budget_cost_map[budget_period]]
+    return config['guest_budget'] - cost
+
+
+def is_within_budget(config, usage, update: Update, is_inline=False) -> bool:
     """
-
-    def __init__(self, user_id, user_name, logs_dir="usage_logs"):
-        """
-        Initializes UsageTracker for a user with current date.
-        Loads usage data from usage log file.
-        :param user_id: Telegram ID of the user
-        :param user_name: Telegram user name
-        :param logs_dir: path to directory of usage logs, defaults to "usage_logs"
-        """
-        self.user_id = user_id
-        self.logs_dir = logs_dir
-        # path to usage file of given user
-        self.user_file = f"{logs_dir}/{user_id}.json"
-
-        if os.path.isfile(self.user_file):
-            with open(self.user_file, "r") as file:
-                self.usage = json.load(file)
-            if 'vision_tokens' not in self.usage['usage_history']:
-                self.usage['usage_history']['vision_tokens'] = {}
-            if 'tts_characters' not in self.usage['usage_history']:
-                self.usage['usage_history']['tts_characters'] = {}
-        else:
-            # ensure directory exists
-            pathlib.Path(logs_dir).mkdir(exist_ok=True)
-            # create new dictionary for this user
-            self.usage = {
-                "user_name": user_name,
-                "current_cost": {"day": 0.0, "month": 0.0, "all_time": 0.0, "last_update": str(date.today())},
-                "usage_history": {"chat_tokens": {}, "transcription_seconds": {}, "number_images": {}, "tts_characters": {}, "vision_tokens":{}}
-            }
-
-    # token usage functions:
-
-    def add_chat_tokens(self, tokens, tokens_price=0.002):
-        """Adds used tokens from a request to a users usage history and updates current cost
-        :param tokens: total tokens used in last request
-        :param tokens_price: price per 1000 tokens, defaults to 0.002
-        """
-        today = date.today()
-        token_cost = round(float(tokens) * tokens_price / 1000, 6)
-        self.add_current_costs(token_cost)
-
-        # update usage_history
-        if str(today) in self.usage["usage_history"]["chat_tokens"]:
-            # add token usage to existing date
-            self.usage["usage_history"]["chat_tokens"][str(today)] += tokens
-        else:
-            # create new entry for current date
-            self.usage["usage_history"]["chat_tokens"][str(today)] = tokens
-
-        # write updated token usage to user file
-        with open(self.user_file, "w") as outfile:
-            json.dump(self.usage, outfile)
-
-    def get_current_token_usage(self):
-        """Get token amounts used for today and this month
-
-        :return: total number of tokens used per day and per month
-        """
-        today = date.today()
-        if str(today) in self.usage["usage_history"]["chat_tokens"]:
-            usage_day = self.usage["usage_history"]["chat_tokens"][str(today)]
-        else:
-            usage_day = 0
-        month = str(today)[:7]  # year-month as string
-        usage_month = 0
-        for today, tokens in self.usage["usage_history"]["chat_tokens"].items():
-            if today.startswith(month):
-                usage_month += tokens
-        return usage_day, usage_month
-
-    # image usage functions:
-
-    def add_image_request(self, image_size, image_prices="0.016,0.018,0.02"):
-        """Add image request to users usage history and update current costs.
-
-        :param image_size: requested image size
-        :param image_prices: prices for images of sizes ["256x256", "512x512", "1024x1024"],
-                             defaults to [0.016, 0.018, 0.02]
-        """
-        sizes = ["256x256", "512x512", "1024x1024"]
-        requested_size = sizes.index(image_size)
-        image_cost = image_prices[requested_size]
-        today = date.today()
-        self.add_current_costs(image_cost)
-
-        # update usage_history
-        if str(today) in self.usage["usage_history"]["number_images"]:
-            # add token usage to existing date
-            self.usage["usage_history"]["number_images"][str(today)][requested_size] += 1
-        else:
-            # create new entry for current date
-            self.usage["usage_history"]["number_images"][str(today)] = [0, 0, 0]
-            self.usage["usage_history"]["number_images"][str(today)][requested_size] += 1
-
-        # write updated image number to user file
-        with open(self.user_file, "w") as outfile:
-            json.dump(self.usage, outfile)
-
-    def get_current_image_count(self):
-        """Get number of images requested for today and this month.
-
-        :return: total number of images requested per day and per month
-        """
-        today = date.today()
-        if str(today) in self.usage["usage_history"]["number_images"]:
-            usage_day = sum(self.usage["usage_history"]["number_images"][str(today)])
-        else:
-            usage_day = 0
-        month = str(today)[:7]  # year-month as string
-        usage_month = 0
-        for today, images in self.usage["usage_history"]["number_images"].items():
-            if today.startswith(month):
-                usage_month += sum(images)
-        return usage_day, usage_month
+    Checks if the user reached their usage limit.
+    Initializes UsageTracker for user and guest when needed.
+    :param config: The bot configuration object
+    :param usage: The usage tracker object
+    :param update: Telegram update object
+    :param is_inline: Boolean flag for inline queries
+    :return: Boolean indicating if the user has a positive budget
+    """
+    user_id = update.inline_query.from_user.id if is_inline else update.message.from_user.id
+    name = update.inline_query.from_user.name if is_inline else update.message.from_user.name
+    if user_id not in usage:
+        usage[user_id] = UsageTracker(user_id, name)
+    remaining_budget = get_remaining_budget(config, usage, update, is_inline=is_inline)
+    return remaining_budget > 0
 
 
-    # vision usage functions
-    def add_vision_tokens(self, tokens, vision_token_price=0.01):
-        """
-         Adds requested vision tokens to a users usage history and updates current cost.
-        :param tokens: total tokens used in last request
-        :param vision_token_price: price per 1K tokens transcription, defaults to 0.01
-        """
-        today = date.today()
-        token_price = round(tokens * vision_token_price / 1000, 2)
-        self.add_current_costs(token_price)
-
-        # update usage_history
-        if str(today) in self.usage["usage_history"]["vision_tokens"]:
-            # add requested seconds to existing date
-            self.usage["usage_history"]["vision_tokens"][str(today)] += tokens
-        else:
-            # create new entry for current date
-            self.usage["usage_history"]["vision_tokens"][str(today)] = tokens
-
-        # write updated token usage to user file
-        with open(self.user_file, "w") as outfile:
-            json.dump(self.usage, outfile)
-
-    def get_current_vision_tokens(self):
-        """Get vision tokens for today and this month.
-
-        :return: total amount of vision tokens per day and per month
-        """
-        today = date.today()
-        if str(today) in self.usage["usage_history"]["vision_tokens"]:
-            tokens_day = self.usage["usage_history"]["vision_tokens"][str(today)]
-        else:
-            tokens_day = 0
-        month = str(today)[:7]  # year-month as string
-        tokens_month = 0
-        for today, tokens in self.usage["usage_history"]["vision_tokens"].items():
-            if today.startswith(month):
-                tokens_month += tokens
-        return tokens_day, tokens_month
-
-    # tts usage functions:
-
-    def add_tts_request(self, text_length, tts_model, tts_prices):
-        tts_models = ['tts-1', 'tts-1-hd']
-        price = tts_prices[tts_models.index(tts_model)]
-        today = date.today()
-        tts_price = round(text_length * price / 1000, 2)
-        self.add_current_costs(tts_price)
-
-        if 'tts_characters' not in self.usage['usage_history']:
-            self.usage['usage_history']['tts_characters'] = {}
-        
-        if tts_model not in self.usage['usage_history']['tts_characters']:
-            self.usage['usage_history']['tts_characters'][tts_model] = {}
-
-        # update usage_history
-        if str(today) in self.usage["usage_history"]["tts_characters"][tts_model]:
-            # add requested text length to existing date
-            self.usage["usage_history"]["tts_characters"][tts_model][str(today)] += text_length
-        else:
-            # create new entry for current date
-            self.usage["usage_history"]["tts_characters"][tts_model][str(today)] = text_length
-
-        # write updated token usage to user file
-        with open(self.user_file, "w") as outfile:
-            json.dump(self.usage, outfile)
-
-    def get_current_tts_usage(self):
-        """Get length of speech generated for today and this month.
-
-        :return: total amount of characters converted to speech per day and per month
-        """
-
-        tts_models = ['tts-1', 'tts-1-hd']
-        today = date.today()
-        characters_day = 0
-        for tts_model in tts_models:
-            if tts_model in self.usage["usage_history"]["tts_characters"] and \
-                str(today) in self.usage["usage_history"]["tts_characters"][tts_model]:
-                characters_day += self.usage["usage_history"]["tts_characters"][tts_model][str(today)]
-
-        month = str(today)[:7]  # year-month as string
-        characters_month = 0
-        for tts_model in tts_models:
-            if tts_model in self.usage["usage_history"]["tts_characters"]: 
-                for today, characters in self.usage["usage_history"]["tts_characters"][tts_model].items():
-                    if today.startswith(month):
-                        characters_month += characters
-        return int(characters_day), int(characters_month)
+def add_chat_request_to_usage_tracker(usage, config, user_id, used_tokens):
+    """
+    Add chat request to usage tracker
+    :param usage: The usage tracker object
+    :param config: The bot configuration object
+    :param user_id: The user id
+    :param used_tokens: The number of tokens used
+    """
+    try:
+        if int(used_tokens) == 0:
+            logging.warning('No tokens used. Not adding chat request to usage tracker.')
+            return
+        # add chat request to users usage tracker
+        usage[user_id].add_chat_tokens(used_tokens, config['token_price'])
+        # add guest chat request to guest usage tracker
+        allowed_user_ids = config['allowed_user_ids'].split(',')
+        if str(user_id) not in allowed_user_ids and 'guests' in usage:
+            usage["guests"].add_chat_tokens(used_tokens, config['token_price'])
+    except Exception as e:
+        logging.warning(f'Failed to add tokens to usage_logs: {str(e)}')
+        pass
 
 
-    # transcription usage functions:
+def get_reply_to_message_id(config, update: Update):
+    """
+    Returns the message id of the message to reply to
+    :param config: Bot configuration object
+    :param update: Telegram update object
+    :return: Message id of the message to reply to, or None if quoting is disabled
+    """
+    if config['enable_quoting'] or is_group_chat(update):
+        return update.message.message_id
+    return None
 
-    def add_transcription_seconds(self, seconds, minute_price=0.006):
-        """Adds requested transcription seconds to a users usage history and updates current cost.
-        :param seconds: total seconds used in last request
-        :param minute_price: price per minute transcription, defaults to 0.006
-        """
-        today = date.today()
-        transcription_price = round(seconds * minute_price / 60, 2)
-        self.add_current_costs(transcription_price)
 
-        # update usage_history
-        if str(today) in self.usage["usage_history"]["transcription_seconds"]:
-            # add requested seconds to existing date
-            self.usage["usage_history"]["transcription_seconds"][str(today)] += seconds
-        else:
-            # create new entry for current date
-            self.usage["usage_history"]["transcription_seconds"][str(today)] = seconds
+def is_direct_result(response: any) -> bool:
+    """
+    Checks if the dict contains a direct result that can be sent directly to the user
+    :param response: The response value
+    :return: Boolean indicating if the result is a direct result
+    """
+    if type(response) is not dict:
+        try:
+            json_response = json.loads(response)
+            return json_response.get('direct_result', False)
+        except:
+            return False
+    else:
+        return response.get('direct_result', False)
 
-        # write updated token usage to user file
-        with open(self.user_file, "w") as outfile:
-            json.dump(self.usage, outfile)
 
-    def add_current_costs(self, request_cost):
-        """
-        Add current cost to all_time, day and month cost and update last_update date.
-        """
-        today = date.today()
-        last_update = date.fromisoformat(self.usage["current_cost"]["last_update"])
+async def handle_direct_result(config, update: Update, response: any):
+    """
+    Handles a direct result from a plugin
+    """
+    if type(response) is not dict:
+        response = json.loads(response)
 
-        # add to all_time cost, initialize with calculation of total_cost if key doesn't exist
-        self.usage["current_cost"]["all_time"] = \
-            self.usage["current_cost"].get("all_time", self.initialize_all_time_cost()) + request_cost
-        # add current cost, update new day
-        if today == last_update:
-            self.usage["current_cost"]["day"] += request_cost
-            self.usage["current_cost"]["month"] += request_cost
-        else:
-            if today.month == last_update.month:
-                self.usage["current_cost"]["month"] += request_cost
-            else:
-                self.usage["current_cost"]["month"] = request_cost
-            self.usage["current_cost"]["day"] = request_cost
-            self.usage["current_cost"]["last_update"] = str(today)
+    result = response['direct_result']
+    kind = result['kind']
+    format = result['format']
+    value = result['value']
 
-    def get_current_transcription_duration(self):
-        """Get minutes and seconds of audio transcribed for today and this month.
+    common_args = {
+        'message_thread_id': get_thread_id(update),
+        'reply_to_message_id': get_reply_to_message_id(config, update),
+    }
 
-        :return: total amount of time transcribed per day and per month (4 values)
-        """
-        today = date.today()
-        if str(today) in self.usage["usage_history"]["transcription_seconds"]:
-            seconds_day = self.usage["usage_history"]["transcription_seconds"][str(today)]
-        else:
-            seconds_day = 0
-        month = str(today)[:7]  # year-month as string
-        seconds_month = 0
-        for today, seconds in self.usage["usage_history"]["transcription_seconds"].items():
-            if today.startswith(month):
-                seconds_month += seconds
-        minutes_day, seconds_day = divmod(seconds_day, 60)
-        minutes_month, seconds_month = divmod(seconds_month, 60)
-        return int(minutes_day), round(seconds_day, 2), int(minutes_month), round(seconds_month, 2)
+    if kind == 'photo':
+        if format == 'url':
+            await update.effective_message.reply_photo(**common_args, photo=value)
+        elif format == 'path':
+            await update.effective_message.reply_photo(**common_args, photo=open(value, 'rb'))
+    elif kind == 'gif' or kind == 'file':
+        if format == 'url':
+            await update.effective_message.reply_document(**common_args, document=value)
+        if format == 'path':
+            await update.effective_message.reply_document(**common_args, document=open(value, 'rb'))
+    elif kind == 'dice':
+        await update.effective_message.reply_dice(**common_args, emoji=value)
 
-    # general functions
-    def get_current_cost(self):
-        """Get total USD amount of all requests of the current day and month
+    if format == 'path':
+        cleanup_intermediate_files(response)
 
-        :return: cost of current day and month
-        """
-        today = date.today()
-        last_update = date.fromisoformat(self.usage["current_cost"]["last_update"])
-        if today == last_update:
-            cost_day = self.usage["current_cost"]["day"]
-            cost_month = self.usage["current_cost"]["month"]
-        else:
-            cost_day = 0.0
-            if today.month == last_update.month:
-                cost_month = self.usage["current_cost"]["month"]
-            else:
-                cost_month = 0.0
-        # add to all_time cost, initialize with calculation of total_cost if key doesn't exist
-        cost_all_time = self.usage["current_cost"].get("all_time", self.initialize_all_time_cost())
-        return {"cost_today": cost_day, "cost_month": cost_month, "cost_all_time": cost_all_time}
 
-    def initialize_all_time_cost(self, tokens_price=0.002, image_prices="0.016,0.018,0.02", minute_price=0.006, vision_token_price=0.01, tts_prices='0.015,0.030'):
-        """Get total USD amount of all requests in history
-        
-        :param tokens_price: price per 1000 tokens, defaults to 0.002
-        :param image_prices: prices for images of sizes ["256x256", "512x512", "1024x1024"],
-            defaults to [0.016, 0.018, 0.02]
-        :param minute_price: price per minute transcription, defaults to 0.006
-        :param vision_token_price: price per 1K vision token interpretation, defaults to 0.01
-        :param tts_prices: price per 1K characters tts per model ['tts-1', 'tts-1-hd'], defaults to [0.015, 0.030]
-        :return: total cost of all requests
-        """
-        total_tokens = sum(self.usage['usage_history']['chat_tokens'].values())
-        token_cost = round(total_tokens * tokens_price / 1000, 6)
+def cleanup_intermediate_files(response: any):
+    """
+    Deletes intermediate files created by plugins
+    """
+    if type(response) is not dict:
+        response = json.loads(response)
 
-        total_images = [sum(values) for values in zip(*self.usage['usage_history']['number_images'].values())]
-        image_prices_list = [float(x) for x in image_prices.split(',')]
-        image_cost = sum([count * price for count, price in zip(total_images, image_prices_list)])
+    result = response['direct_result']
+    format = result['format']
+    value = result['value']
 
-        total_transcription_seconds = sum(self.usage['usage_history']['transcription_seconds'].values())
-        transcription_cost = round(total_transcription_seconds * minute_price / 60, 2)
+    if format == 'path':
+        if os.path.exists(value):
+            os.remove(value)
 
-        total_vision_tokens = sum(self.usage['usage_history']['vision_tokens'].values())
-        vision_cost = round(total_vision_tokens * vision_token_price / 1000, 2)
 
-        total_characters = [sum(tts_model.values()) for tts_model in self.usage['usage_history']['tts_characters'].values()]
-        tts_prices_list = [float(x) for x in tts_prices.split(',')]
-        tts_cost = round(sum([count * price / 1000 for count, price in zip(total_characters, tts_prices_list)]), 2)
+# Function to encode the image
+def encode_image(fileobj):
+    image = base64.b64encode(fileobj.getvalue()).decode('utf-8')
+    return f'data:image/jpeg;base64,{image}'
 
-        all_time_cost = token_cost + transcription_cost + image_cost + vision_cost + tts_cost
-        return all_time_cost
+
+def decode_image(imgbase64):
+    image = imgbase64[len('data:image/jpeg;base64,'):]
+    return base64.b64decode(image)
