@@ -31,6 +31,9 @@ import requests
 import yfinance as yf
 import ta
 
+from utils import summarize_url  # đảm bảo đã import đúng ở đầu file
+
+
 
 def find_coin_id_by_symbol(symbol):
     try:
@@ -95,7 +98,25 @@ class ChatGPTTelegramBot:
         self.usage = {}
         self.last_message = {}
         self.inline_queries_cache = {}
+    async def summarize_and_reply(self, update: Update):
+        """
+        Tự động tóm tắt nội dung khi tin nhắn chứa 'tóm tắt' và URL.
+        """
+        prompt = message_text(update.message) or ""
+        text = prompt.lower()
 
+        if "http" in text and "tóm tắt" in text:
+            for word in prompt.split():
+                if word.startswith("http"):
+                    try:
+                        await update.message.reply_chat_action(action=constants.ChatAction.TYPING)
+                        summary = await summarize_url(word)
+                        await update.message.reply_text(summary[:4096])
+                    except Exception as e:
+                        await update.message.reply_text(f"❌ Lỗi khi tóm tắt: {e}")
+                    return True  # đã xử lý rồi
+        return False  # chưa xử lý
+        
     async def help(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """
         Shows the help menu.
@@ -698,6 +719,8 @@ class ChatGPTTelegramBot:
         user_id = update.message.from_user.id
         prompt = message_text(update.message)
         text = update.message.text.lower()
+        if await self.summarize_and_reply(update):
+            return  # đã xử lý tóm tắt thì không chạy tiếp
         if is_group_chat(update):
             bot_username = context.bot.username.lower()
             message_text_lower = prompt.lower()
