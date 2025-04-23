@@ -342,15 +342,10 @@ Em kết thúc bằng "em đã gửi báo cáo ạ"
 
 Bạn là một chuyên gia UXUI. Hãy đánh giá giao diện sau theo các tiêu chuẩn thiết kế chuyên sâu. Phản hồi rõ ràng, chia thành từng phần với nhận xét điểm tốt, điểm cần cải thiện và gợi ý cụ thể (nếu có).
 
-1. Strategy & Scope
 
-Problem solving: Thiết kế hiện tại đã giải đúng bài toán chưa?
 
-Prioritization: Đây có phải là giải pháp đơn giản nhất cho vấn đề không?
 
-Approach: Có cách tiếp cận nào khác tốt hơn không?
-
-2. Structure (Information architecture)
+** Structure (Information architecture) ** 
 
 Clarity: Thông tin có tổ chức rõ ràng, dễ hiểu không?
 
@@ -360,17 +355,10 @@ Reusability: Có tận dụng được component/system cũ không?
 
 Scalability: Thiết kế có dễ mở rộng/reuse trong tương lai không?
 
-3. Skeleton (Flow)
-
-Flow: Luồng sử dụng đã gọn, mượt chưa?
-
-Edge cases: Trường hợp lỗi hoặc bất thường đã được tính đến chưa?
-
 Usability: Người dùng dễ hiểu và thao tác không?
 
-Reusability: Flow có dùng được lại trong các màn khác không?
+** Surface (Visual UI) ** 
 
-4. Surface (Visual UI)
 
 Visual design: Có đẹp và đúng brand không?
 
@@ -384,7 +372,7 @@ Better UI: Có thể tối giản/fancy hơn không?
 
 Emotional design: Có tạo được cảm xúc vui vẻ, tin tưởng, tiện nghi không?
 
-5. CHA Checklist (Consistency – Hierarchy – Alignment)
+** Checklist (Consistency – Hierarchy – Alignment) ** 
 
 Consistency:
 
@@ -410,7 +398,7 @@ Bám lưới (grid system)
 
 Padding/margin hợp lý và đồng nhất
 
-🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Tránh đánh giá mơ hồ.
+🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Đánh giá chuyên sâu, khen chê thẳng thắn trên góc nhìn chuyên gia.
 
 
 
@@ -840,15 +828,10 @@ Em kết thúc bằng "em đã gửi báo cáo ạ"
 
 Bạn là một chuyên gia UXUI. Hãy đánh giá giao diện sau theo các tiêu chuẩn thiết kế chuyên sâu. Phản hồi rõ ràng, chia thành từng phần với nhận xét điểm tốt, điểm cần cải thiện và gợi ý cụ thể (nếu có).
 
-1. Strategy & Scope
 
-Problem solving: Thiết kế hiện tại đã giải đúng bài toán chưa?
 
-Prioritization: Đây có phải là giải pháp đơn giản nhất cho vấn đề không?
 
-Approach: Có cách tiếp cận nào khác tốt hơn không?
-
-2. Structure (Information architecture)
+** Structure (Information architecture) ** 
 
 Clarity: Thông tin có tổ chức rõ ràng, dễ hiểu không?
 
@@ -858,17 +841,10 @@ Reusability: Có tận dụng được component/system cũ không?
 
 Scalability: Thiết kế có dễ mở rộng/reuse trong tương lai không?
 
-3. Skeleton (Flow)
-
-Flow: Luồng sử dụng đã gọn, mượt chưa?
-
-Edge cases: Trường hợp lỗi hoặc bất thường đã được tính đến chưa?
-
 Usability: Người dùng dễ hiểu và thao tác không?
 
-Reusability: Flow có dùng được lại trong các màn khác không?
+** Surface (Visual UI) ** 
 
-4. Surface (Visual UI)
 
 Visual design: Có đẹp và đúng brand không?
 
@@ -882,7 +858,7 @@ Better UI: Có thể tối giản/fancy hơn không?
 
 Emotional design: Có tạo được cảm xúc vui vẻ, tin tưởng, tiện nghi không?
 
-5. CHA Checklist (Consistency – Hierarchy – Alignment)
+** Checklist (Consistency – Hierarchy – Alignment) ** 
 
 Consistency:
 
@@ -908,7 +884,7 @@ Bám lưới (grid system)
 
 Padding/margin hợp lý và đồng nhất
 
-🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Tránh đánh giá mơ hồ.
+🧠 Nếu một yếu tố không đủ dữ kiện đánh giá, hãy bỏ qua. Đánh giá chuyên sâu, khen chê thẳng thắn trên góc nhìn chuyên gia.
 
 
 
